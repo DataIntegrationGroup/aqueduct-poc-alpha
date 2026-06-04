@@ -70,7 +70,7 @@ flowchart TB
 
 **Cloud Workflows** schedules and coordinates backfill and incremental daily batch runs across Gen 2 functions and Cloud Run jobs.
 
-**Cloud Monitoring** (dashboard exapmle for sync failure, freshness, and error) sits above the pipeline and observes Workflows and downstream steps — not in the critical data path.
+**Cloud Monitoring** (dashboard example for sync failure, freshness, and error) sits above the pipeline and observes Workflows and downstream steps — not in the critical data path.
 
 **Backfill vs incremental:** Daily batches use idempotent writes keyed by source and observation time. Backfill replays a configurable window (initially one month).
 
@@ -90,11 +90,32 @@ aqueduct-poc-alpha/
 └── docker-compose.yml        # Docker compose for local FROST and backing Postgres
 ```
 
-## Technology and non-goals
+## Technology
 
 **In scope:** Python 3.13, `uv` for package management, GCS staging, Cloud Workflows, Cloud Functions Gen 2, Cloud Run, Pydantic for the canonical contract, local FROST via Docker.
 
 **Python practices for our team:** Can be found at [Data Integration Group Python best practices](https://github.com/DataIntegrationGroup/.github/blob/main/profile/README.md) — use as a reference, don't worry about compliance for this POC.
+
+## Python packages
+
+Declared in [pyproject.toml](pyproject.toml). Install with `uv sync`.
+
+Add new packages as needed with `uv add <package>`.
+
+**Runtime**
+
+- `functions-framework` — HTTP/event entrypoints for Cloud Functions Gen 2
+- `httpx` — HTTP client for API calls
+- `pydantic` / `pydantic-settings` — canonical model contract and typed config
+- `google-cloud-storage` — read and write GCS staging objects
+- `google-cloud-secret-manager` — load secrets from GCP Secret Manager
+- `geojson`, `shapely`, `pyproj`, `numpy` — parse and transform geospatial / temporal data (geometries, CRS, coordinates) for the canonical model as needed.
+
+**Dev** (`uv sync --group dev`)
+
+- `pytest` — unit and integration tests
+- `pytest-cov` — test coverage reports
+- `pytest-httpx` — mock HTTP responses in tests
 
 ## Prerequisites
 
