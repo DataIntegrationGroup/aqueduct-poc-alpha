@@ -46,20 +46,24 @@ flowchart TB
   end
   subgraph curate [Transform]
     Xform[Canonical_Model]
+  end
+  subgraph persist [SensorThings]
     ST[SensorThings_DB]
   end
-  FROST[FROST_API (local Docker)]
+  subgraph serve [Query]
+    FROST[FROST_SensorThings_API_local_Docker]
+  end
   Mon -.->|sync_failure_freshness_error| WF
   Mon -.->|observes| CF
   Mon -.->|observes| CR
-  Mon -.->|observes| Transform
+  Mon -.->|observes| Xform
   WF -->|orchestrates_backfill_and_daily_batch| CF
   WF -->|orchestrates| CR
   HydroVu --> CF
   CABQ --> CF
   CF --> GCS
   CR --> GCS
-  GCS --> Transform
+  GCS --> Xform
   Xform --> ST
   ST --> FROST
 ```
