@@ -11,23 +11,23 @@ Scratch repo for a GCP-native proof of concept that ingests **PVACD HydroVu** an
 
 ## Acceptance criteria
 
-- [ ] **Sources:** PVACD HydroVu; CABQ CKAN
-- [ ] **History:** 1 month of historical data per source
-- [ ] **Loads (HydroVu):** Backfill
-- [ ] **Loads (CABQ):** Backfill
-- [ ] **Increment (HydroVu):** Incremental daily batch
-- [ ] **Increment (CABQ):** Incremental daily batch
-- [ ] **Soak:** "Daily" batch loads succeed for at least 2 consecutive increments
-- [ ] **Staging:** Data lands in **GCS** (e.g. `raw/{source}/dt=YYYY-MM-DD/`)
-- [ ] **Transform (HydroVu):** Canonical model contract → **SensorThings DB**
-- [ ] **Transform (CABQ):** Canonical model contract → **SensorThings DB**
-- [ ] **Query:** Data queryable via **FROST SensorThings API** from local FROST instance
-- [ ] **Local FROST:** Docker instance using the latest [FROST-Server](https://hub.docker.com/r/fraunhoferiosb/frost-server/)
-- [ ] **Ops:** **Cloud Monitoring** dashboard example with example alerts for sync failure, freshness, and error
-- [ ] **Docs:** Evaluation writeup scoring the POC against criteria (separate deliverable)
-- [ ] **Code:** All pipeline code lives in this repo
+- **Sources:** PVACD HydroVu; CABQ CKAN
+- **History:** 1 month of historical data per source
+- **Loads (HydroVu):** Backfill
+- **Loads (CABQ):** Backfill
+- **Increment (HydroVu):** Incremental daily batch
+- **Increment (CABQ):** Incremental daily batch
+- **Soak:** "Daily" batch loads succeed for at least 2 consecutive increments
+- **Staging:** Data lands in **GCS** (e.g. `raw/{source}/dt=YYYY-MM-DD/`)
+- **Transform (HydroVu):** Canonical model contract → **SensorThings DB**
+- **Transform (CABQ):** Canonical model contract → **SensorThings DB**
+- **Query:** Data queryable via **FROST SensorThings API** from local FROST instance
+- **Local FROST:** Docker instance using the latest [FROST-Server](https://hub.docker.com/r/fraunhoferiosb/frost-server/)
+- **Ops:** **Cloud Monitoring** dashboard example with example alerts for sync failure, freshness, and error
+- **Docs:** Evaluation writeup scoring the POC against criteria (separate deliverable)
+- **Code:** All pipeline code lives in this repo
 
-## Architecture
+## Architecture (starting point, this may not be the ideal structure)
 
 ```mermaid
 flowchart TB
@@ -68,6 +68,8 @@ flowchart TB
   ST --> FROST
 ```
 
+
+
 **Cloud Workflows** schedules and coordinates backfill and incremental daily batch runs across Gen 2 functions and Cloud Run jobs.
 
 **Cloud Monitoring** (dashboard example for sync failure, freshness, and error) sits above the pipeline and observes Workflows and downstream steps — not in the critical data path.
@@ -86,8 +88,7 @@ aqueduct-poc-alpha/
 ├── functions/                # Gen 2 entrypoints per source or per stage
 ├── run/                      # Cloud Run related if needed
 ├── workflows/                # Cloud Workflows if needed
-└── Dockerfile                # Dockerfile if needed
-└── docker-compose.yml        # Docker compose for local FROST and backing Postgres
+└── docker-compose.yml        # Docker compose for local FROST dev and backing Postgres
 ```
 
 ## Technology
@@ -119,11 +120,41 @@ Add new packages as needed with `uv add <package>`.
 
 ## Prerequisites
 
-To be filled in as the POC is implemented:
-
 - `uv` and Python 3.13
 - `gcloud` CLI, authenticated to the target GCP project
-- Docker for local FROST and backing Postgres
-- `.env.example` → `.env` (when added); secrets in cloud via Secret Manager
+- Docker and Docker Compose for local FROST and PostGIS
+- `.env.example` → `.env` for compose (see [Local FROST](#local-frost)); secrets in cloud via Secret Manager
 
+## Local FROST
 
+Local [FROST-Server](https://hub.docker.com/r/fraunhoferiosb/frost-server/) (`2.6`) with PostGIS 16, via [docker-compose.yml](docker-compose.yml). Pattern follows the [official Docker deployment](https://fraunhoferiosb.github.io/FROST-Server/deployment/docker.html).
+
+**Setup**
+
+```bash
+cp .env.example .env
+# Edit .env: set POSTGRES_PASSWORD (and other vars if needed)
+docker compose up -d
+```
+
+**Verify**
+
+- Service root: [http://localhost:8080/FROST-Server/](http://localhost:8080/FROST-Server/)
+- SensorThings API v1.1: [http://localhost:8080/FROST-Server/v1.1](http://localhost:8080/FROST-Server/v1.1)
+
+Optional smoke test (demo entities from [Docker quick-start](https://fraunhoferiosb.github.io/FROST-Server/deployment/docker.html)):
+
+```bash
+curl -sO https://gist.githubusercontent.com/hylkevds/4ffba774fe0128305047b7bcbcd2672e/raw/demoEntities.json
+curl -X POST -H "Content-Type: application/json" -d @demoEntities.json \
+  http://localhost:8080/FROST-Server/v1.1/Things
+```
+
+**Reset data** (drops the `postgis_volume` volume):
+
+```bash
+docker compose down -v
+```
+
+**Pipeline integration:** write and query through the SensorThings HTTP API on FROST (e.g. `http://localhost:8080/FROST-Server/v1.1/...` with `httpx`). 
+Running locally like this will probably not work for trying the functions when they are running in GCP, we can try to host a sample version of FROST-Server in GCP for this POC when we get to that task.
