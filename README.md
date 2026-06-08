@@ -76,30 +76,54 @@ flowchart TB
 
 **Backfill vs incremental:** Daily batches use idempotent writes keyed by source and observation time. Backfill replays a configurable window (initially one month).
 
-## Suggested layout (starting point, this may not be the ideal structure)
-
-Starting-point, please change as needed.
+## Repo layout
 
 ```
 aqueduct-poc-alpha/
 ├── README.md
 ├── pyproject.toml
-├── src/                      # shared libs: clients, models, transforms
-├── functions/                # Gen 2 entrypoints per source or per stage
-├── run/                      # Cloud Run related if needed
-├── workflows/                # Cloud Workflows if needed
-└── docker-compose.yml        # Docker compose for local FROST dev and backing Postgres
+├── src/
+│   └── aqueduct_cloud_functions/   # shared libs (mirrors bravo's aqueduct_dagster/)
+│       └── canonical/              # SensorThings canonical model contract
+├── functions/                      # Gen 2 entrypoints per source or per stage
+├── run/                            # Cloud Run related if needed
+├── workflows/                      # Cloud Workflows if needed
+└── docker-compose.yml              # local FROST dev and backing Postgres
 ```
+
+## Canonical model
+
+The canonical model is the fixed SensorThings shape all source adapters must produce before data reaches FROST. It lives in [`src/aqueduct_cloud_functions/canonical/`](src/aqueduct_cloud_functions/canonical/) and mirrors the contract used in [aqueduct-poc-bravo](https://github.com/DataIntegrationGroup/aqueduct-poc-bravo/tree/scaffold-dagster-dlt/ST2DAT-78/src/aqueduct_dagster/canonical).
+
+| File | Purpose |
+|------|---------|
+| `canonical_model.py` | Dataclasses for Location, Thing, Sensor, ObservedProperty, Datastream, Observation, Bundle |
+| `canonical_constants.py` | Shared units, sensors, observed properties, and key-building helpers |
+| `base_adapter.py` | Abstract adapter interface (`extract`, `to_thing`, `to_observations`, `run`) |
+| `CANONICAL_MODEL.md` | Full entity reference and adapter conventions |
+
+After `uv sync`, import from the installed package:
+
+```python
+from aqueduct_cloud_functions.canonical import (
+    BaseAdapter,
+    CanonicalBundle,
+    MANUAL_SENSOR,
+    make_location_key,
+)
+```
+
+Source adapters inherit `BaseAdapter` and yield `CanonicalBundle` objects. A FROST loader consumes those bundles — same contract as bravo, different orchestration layer.
 
 ## Technology
 
-**In scope:** Python 3.13, `uv` for package management, GCS staging, Cloud Workflows, Cloud Functions Gen 2, Cloud Run, Pydantic for the canonical contract, local FROST via Docker.
+**In scope:** Python 3.13, `uv` for package management, GCS staging, Cloud Workflows, Cloud Functions Gen 2, Cloud Run, dataclass-based canonical model (`aqueduct_cloud_functions.canonical`), Pydantic for typed config, local FROST via Docker.
 
 **Python practices for our team:** Can be found at [Data Integration Group Python best practices](https://github.com/DataIntegrationGroup/.github/blob/main/profile/README.md) — use as a reference, don't worry about compliance for this POC.
 
 ## Python packages
 
-Declared in [pyproject.toml](pyproject.toml). Install with `uv sync`.
+Declared in [pyproject.toml](pyproject.toml). Install with `uv sync` — this also installs the local `aqueduct_cloud_functions` package (built via hatchling) so canonical imports work project-wide.
 
 Add new packages as needed with `uv add <package>`.
 
@@ -107,7 +131,7 @@ Add new packages as needed with `uv add <package>`.
 
 - `functions-framework` — HTTP/event entrypoints for Cloud Functions Gen 2
 - `httpx` — HTTP client for API calls
-- `pydantic` / `pydantic-settings` — canonical model contract and typed config
+- `pydantic` / `pydantic-settings` — typed config and settings
 - `google-cloud-storage` — read and write GCS staging objects
 - `google-cloud-secret-manager` — load secrets from GCP Secret Manager
 - `geojson`, `shapely`, `pyproj`, `numpy` — parse and transform geospatial / temporal data (geometries, CRS, coordinates) for the canonical model as needed.
