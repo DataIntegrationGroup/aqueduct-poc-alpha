@@ -30,7 +30,7 @@ wheels = [
 [[package]]
 name = "aqueduct-poc-alpha"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "functions-framework" },
     { name = "geojson" },
