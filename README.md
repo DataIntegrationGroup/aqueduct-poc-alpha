@@ -1,5 +1,9 @@
 # Aqueduct POC A (`aqueduct-poc-alpha`)
 
+[![CI](https://github.com/DataIntegrationGroup/aqueduct-poc-alpha/actions/workflows/ci.yml/badge.svg)](https://github.com/DataIntegrationGroup/aqueduct-poc-alpha/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
+
 Scratch repo for a GCP-native proof of concept that ingests **PVACD HydroVu** and **City of Albuquerque (CABQ) CKAN** data, lands it in **GCS** in a staging form, transforms via a **canonical model agreement** into **SensorThings**, and exposes data through a **local FROST** instance spun up via docker compose.
 
 ## Why this repo exists
@@ -85,8 +89,10 @@ aqueduct-poc-alpha/
 ├── aqueduct_cloud_functions/       # shared package (mirrors bravo's aqueduct_dagster/)
 │   ├── canonical/                  # SensorThings dataclasses, constants, BaseAdapter
 │   ├── adapters/                   # source → canonical mapping (CABQ, HydroVu)
-│   ├── clients/                    # TODO — GCS, HydroVu API, CKAN API
-│   └── loaders/                    # TODO — canonical → FROST API
+│   ├── clients/                    # GCS staging + HydroVu API (TODO: CKAN API)
+│   ├── loaders/                    # TODO — canonical → FROST API
+│   └── settings.py                 # pydantic-settings env config per handler
+├── tests/                          # pytest suite (clients + handlers, no network)
 └── workflows/                      # TODO — orchestration YAML (backfill, daily batch)
 ```
 
@@ -169,15 +175,67 @@ Add new packages with `uv add <package>`, then re-export.
 - `pytest` — unit and integration tests
 - `pytest-cov` — test coverage reports
 - `pytest-httpx` — mock HTTP responses in tests
+- `ruff` — formatting and linting
+- `mypy` — static type checking
+- `pre-commit` — runs ruff + mypy before each commit
+
+## Linting, typing, and tests
+
+Formatting (ruff format), linting (ruff), and type checking (mypy) run in pre-commit hooks and in [GitHub Actions](.github/workflows/ci.yml) on PRs to `staging` and `main`, alongside the pytest suite.
+
+```bash
+uv sync --group dev
+uv run pre-commit install          # one-time: enable the git hook
+uv run pre-commit run --all-files  # run all hooks manually
+uv run pytest --cov=aqueduct_cloud_functions --cov=main
+```
+
+## PVACD HydroVu ingest
+
+`pvacd_ingest` ([main.py](main.py)) pulls from the [HydroVu public API](https://www.hydrovu.com/public-api/docs/) (OAuth2 client credentials) and stages raw JSON in GCS:
+
+```
+raw/pvacd/dt=YYYY-MM-DD/locations.json                  # all account locations
+raw/pvacd/dt=YYYY-MM-DD/friendly_names.json             # parameterId/unitId → names
+raw/pvacd/dt=YYYY-MM-DD/readings/location_{id}.json     # raw readings pages per location
+```
+
+**Incremental approach:** no stored cursor — each run fetches a lookback window (default `PVACD_LOOKBACK_DAYS=1`) ending now. Object names are deterministic per `dt` partition, so re-runs overwrite in place, and the downstream FROST loader upserts by source key + observation time. Backfill is the same code path with a wider window.
+
+Request parameters (query string or JSON body; body wins):
+
+| Field           | Type             | Meaning                                          |
+| --------------- | ---------------- | ------------------------------------------------ |
+| `lookback_days` | int              | Window ending now (default `PVACD_LOOKBACK_DAYS`) |
+| `start_date`    | date `YYYY-MM-DD` | Explicit window start (UTC midnight)             |
+| `end_date`      | date `YYYY-MM-DD` | Explicit window end / `dt` partition             |
+
+**Run locally** (needs `.env` with HydroVu credentials and a reachable bucket via ADC):
+
+```bash
+uv run functions-framework --target=pvacd_ingest --debug
+curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
+  -d '{"lookback_days": 31}' | python3 -m json.tool   # 1-month backfill
+```
 
 ## Deploy
 
 One source bundle, multiple entry points. Handlers live in [`main.py`](main.py) — repeat deploy with a different `--entry-point` per function (`cabq_ingest`, `pvacd_to_frost`, etc.).
 
+HydroVu credentials live in Secret Manager and reach the function as env vars via `--set-secrets` (one-time setup):
+
 ```bash
-gcloud functions deploy pvacd_ingest \
+printf '%s' "$HYDROVU_CLIENT_ID" | gcloud secrets create hydrovu-client-id --data-file=-
+printf '%s' "$HYDROVU_CLIENT_SECRET" | gcloud secrets create hydrovu-client-secret --data-file=-
+```
+
+```bash
+gcloud functions deploy pvacd-ingest \
   --gen2 --source=. --entry-point=pvacd_ingest \
-  --runtime=python313 --trigger-http ...
+  --runtime=python313 --trigger-http --no-allow-unauthenticated \
+  --timeout=540s \
+  --set-env-vars GCS_BUCKET_NAME=<bucket>,PVACD_LOOKBACK_DAYS=1 \
+  --set-secrets HYDROVU_CLIENT_ID=hydrovu-client-id:latest,HYDROVU_CLIENT_SECRET=hydrovu-client-secret:latest
 ```
 
 ## Prerequisites
