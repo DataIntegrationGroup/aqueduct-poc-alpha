@@ -36,6 +36,10 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# `ruff format` already wraps code at line-length; it can't split long
+# strings, comments, or docstrings, so E501 only nags about those. Disable
+# it per Ruff's recommendation when using the formatter.
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -19,17 +19,17 @@ import logging
 from collections.abc import Iterator
 
 from aqueduct_cloud_functions.canonical.base_adapter import BaseAdapter
+from aqueduct_cloud_functions.canonical.canonical_constants import (
+    DTW_OBS_PROP,  # noqa: F401
+    MANUAL_SENSOR,  # noqa: F401
+    UNIT_FOOT,  # noqa: F401
+    OM_Measurement,  # noqa: F401
+    gwl_datastream_meta,  # noqa: F401
+)
 from aqueduct_cloud_functions.canonical.canonical_model import (
     CanonicalDatastream,
     CanonicalObservation,
     CanonicalThing,
-)
-from aqueduct_cloud_functions.canonical.canonical_constants import (
-    MANUAL_SENSOR,  # noqa: F401
-    DTW_OBS_PROP,  # noqa: F401
-    OM_Measurement,  # noqa: F401
-    UNIT_FOOT,  # noqa: F401
-    gwl_datastream_meta,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
