@@ -24,6 +24,13 @@ from aqueduct_cloud_functions.canonical.canonical_model import (
     CanonicalObservation,
     CanonicalThing,
 )
+from aqueduct_cloud_functions.canonical.canonical_constants import (
+    MANUAL_SENSOR,  # noqa: F401
+    DTW_OBS_PROP,  # noqa: F401
+    OM_Measurement,  # noqa: F401
+    UNIT_FOOT,  # noqa: F401
+    gwl_datastream_meta,  # noqa: F401
+)
 
 logger = logging.getLogger(__name__)
 AGENCY = "CABQ"

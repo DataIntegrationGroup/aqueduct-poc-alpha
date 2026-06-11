@@ -55,9 +55,8 @@ class CanonicalThing:
 class CanonicalSensor:
     """The instrument or method used to take the measurement.
 
-    Use constants from canonical_constants.py — do not create new sensors
-    inside adapters. If the source doesn't specify the instrument, use
-    MANUAL_SENSOR or CONTINUOUS_LOGGER.
+    Use constants from canonical_constants.py — do not create new sensors inside adapters.
+    If the source doesn't specify the instrument, use MANUAL_SENSOR or CONTINUOUS_LOGGER.
     """
 
     external_key: str
@@ -73,8 +72,7 @@ class CanonicalObservedProperty:
     """What is being measured. In water data: depth to water, water elevation, etc.
 
     definition: URI from an established ontology (ODM2, QUDT).
-    Use constants from canonical_constants.py — do not create new properties
-    inside adapters.
+    Use constants from canonical_constants.py — do not create new properties inside adapters.
     """
 
     external_key: str
@@ -88,8 +86,7 @@ class CanonicalObservedProperty:
 class CanonicalDatastream:
     """A time series: one ObservedProperty, one Sensor, one Thing.
 
-    A single well can have multiple Datastreams (e.g. depth to water AND
-    water elevation).
+    A single well can have multiple Datastreams (e.g. depth to water AND water elevation).
     external_key must encode thing + property: e.g. 'cabq-COA-0001-dtw'
     unit_of_measurement and observation_type: use constants from canonical_constants.py
     """
@@ -111,8 +108,7 @@ class CanonicalObservation:
 
     phenomenon_time: always UTC — convert from source timezone if needed.
     result: numeric value in the unit defined by the Datastream.
-    parameters: optional per-observation metadata (e.g. measurement_method,
-    dry_indicator).
+    parameters: optional per-observation metadata (e.g. measurement_method, dry_indicator).
     result_quality: optional QC flag — leave None if source doesn't provide it.
     """
 

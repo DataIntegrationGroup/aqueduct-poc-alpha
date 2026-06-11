@@ -87,18 +87,14 @@ ELEV_OBS_PROP = CanonicalObservedProperty(
 def gwl_datastream_meta(agency: str, location_name: str) -> dict:
     return {
         "name": "Groundwater Levels",
-        "description": (
-            f"Depth to water below ground surface — {agency} {location_name}"
-        ),
+        "description": f"Depth to water below ground surface — {agency} {location_name}",
     }
 
 
 def gwe_datastream_meta(agency: str, location_name: str) -> dict:
     return {
         "name": "Groundwater Elevations",
-        "description": (
-            f"Water level elevation relative to NAVD88 — {agency} {location_name}"
-        ),
+        "description": f"Water level elevation relative to NAVD88 — {agency} {location_name}",
     }
 
 
