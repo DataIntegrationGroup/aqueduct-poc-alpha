@@ -15,6 +15,7 @@ Rules every adapter must follow:
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -26,10 +27,11 @@ class CanonicalLocation:
     geometry: GeoJSON Point — {'type': 'Point', 'coordinates': [lon, lat, elev_metres]}
     external_key: e.g. 'pvacd-NM-28258' or 'cabq-COA-0001'
     """
+
     external_key: str
     name: str
     description: str
-    geometry: dict                          # GeoJSON Point
+    geometry: dict  # GeoJSON Point
     encoding_type: str = "application/geo+json"
     properties: dict = field(default_factory=dict)
 
@@ -41,6 +43,7 @@ class CanonicalThing:
     properties must always include {'agency': '<AGENCY_CODE>'}
     external_key: e.g. 'pvacd-NM-28258' or 'cabq-COA-0001'
     """
+
     external_key: str
     name: str
     description: str
@@ -55,6 +58,7 @@ class CanonicalSensor:
     Use constants from canonical_constants.py — do not create new sensors inside adapters.
     If the source doesn't specify the instrument, use MANUAL_SENSOR or CONTINUOUS_LOGGER.
     """
+
     external_key: str
     name: str
     description: str
@@ -70,6 +74,7 @@ class CanonicalObservedProperty:
     definition: URI from an established ontology (ODM2, QUDT).
     Use constants from canonical_constants.py — do not create new properties inside adapters.
     """
+
     external_key: str
     name: str
     definition: str
@@ -85,6 +90,7 @@ class CanonicalDatastream:
     external_key must encode thing + property: e.g. 'cabq-COA-0001-dtw'
     unit_of_measurement and observation_type: use constants from canonical_constants.py
     """
+
     external_key: str
     name: str
     description: str
@@ -105,6 +111,7 @@ class CanonicalObservation:
     parameters: optional per-observation metadata (e.g. measurement_method, dry_indicator).
     result_quality: optional QC flag — leave None if source doesn't provide it.
     """
+
     phenomenon_time: datetime
     result: float
     datastream_external_key: str
@@ -119,5 +126,6 @@ class CanonicalBundle:
     The FROST loader processes one bundle at a time.
     observations is keyed by datastream external_key.
     """
+
     datastreams: list[CanonicalDatastream]
     observations: dict[str, list[CanonicalObservation]]

@@ -12,18 +12,25 @@ regardless of which source or which POC architecture is running.
 """
 
 from __future__ import annotations
+
 import abc
 import logging
-from typing import Iterator
+from collections.abc import Iterator
 
-from aqueduct_cloud_functions.canonical.canonical_model import CanonicalBundle, CanonicalThing, CanonicalObservation
-from aqueduct_cloud_functions.canonical.canonical_constants import make_location_key, make_datastream_key
+from aqueduct_cloud_functions.canonical.canonical_constants import (
+    make_datastream_key,
+    make_location_key,
+)
+from aqueduct_cloud_functions.canonical.canonical_model import (
+    CanonicalBundle,
+    CanonicalObservation,
+    CanonicalThing,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class BaseAdapter(abc.ABC):
-
     def __init__(self, agency: str) -> None:
         # agency code used to build external_keys — must be consistent across runs
         self.agency = agency.upper()
@@ -73,8 +80,12 @@ class BaseAdapter(abc.ABC):
                     observations=obs_by_ds,
                 )
             except Exception as exc:
-                logger.error("adapter=%s error=%s record=%r",
-                             self.__class__.__name__, exc, record)
+                logger.error(
+                    "adapter=%s error=%s record=%r",
+                    self.__class__.__name__,
+                    exc,
+                    record,
+                )
 
     # ── Helpers available to all adapters ─────────────────────────────────────
 
