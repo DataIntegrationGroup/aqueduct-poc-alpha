@@ -9,12 +9,15 @@ If a constant is missing, add it here — do not work around it.
 Lines marked ⚠ are open questions for the team to resolve.
 """
 
-from aqueduct_cloud_functions.canonical.canonical_model import CanonicalSensor, CanonicalObservedProperty
+from aqueduct_cloud_functions.canonical.canonical_model import (
+    CanonicalObservedProperty,
+    CanonicalSensor,
+)
 
 # ── Placeholders ──────────────────────────────────────────────────────────────
 
 NO_DEFINITION = "No Definition"
-NO_METADATA   = "No Metadata"
+NO_METADATA = "No Metadata"
 
 # ── Observation type ──────────────────────────────────────────────────────────
 
@@ -67,18 +70,19 @@ CONTINUOUS_LOGGER = HYDROVU_SENSOR
 DTW_OBS_PROP = CanonicalObservedProperty(
     external_key="observed-property-depth-to-water-bgs",
     name="Depth to Water Below Ground Surface",
-    definition=NO_DEFINITION,   # ⚠ replace with real ODM2 URI
+    definition=NO_DEFINITION,  # ⚠ replace with real ODM2 URI
     description="Depth from land surface to water surface in a well, in feet",
 )
 
 ELEV_OBS_PROP = CanonicalObservedProperty(
     external_key="observed-property-water-level-elevation-navd88",
     name="Water Level Elevation (NAVD88)",
-    definition=NO_DEFINITION,   # ⚠ replace with real URI
+    definition=NO_DEFINITION,  # ⚠ replace with real URI
     description="Groundwater elevation relative to NAVD88, in feet",
 )
 
 # ── Datastream name templates ─────────────────────────────────────────────────
+
 
 def gwl_datastream_meta(agency: str, location_name: str) -> dict:
     return {
@@ -86,18 +90,22 @@ def gwl_datastream_meta(agency: str, location_name: str) -> dict:
         "description": f"Depth to water below ground surface — {agency} {location_name}",
     }
 
+
 def gwe_datastream_meta(agency: str, location_name: str) -> dict:
     return {
         "name": "Groundwater Elevations",
         "description": f"Water level elevation relative to NAVD88 — {agency} {location_name}",
     }
 
+
 # ── external_key conventions ──────────────────────────────────────────────────
 # Location/Thing:  f"{agency_lower}-{source_id}"           e.g. "pvacd-123"
 # Datastream:      f"{agency_lower}-{source_id}-{suffix}"  e.g. "pvacd-123-dtw"
 
+
 def make_location_key(agency: str, source_id: str) -> str:
     return f"{agency.lower()}-{source_id}"
+
 
 def make_datastream_key(agency: str, source_id: str, suffix: str) -> str:
     return f"{agency.lower()}-{source_id}-{suffix}"

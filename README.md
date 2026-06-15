@@ -218,6 +218,16 @@ curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
   -d '{"lookback_days": 31}' | python3 -m json.tool   # 1-month backfill
 ```
 
+## Linting, typing, and tests
+
+Formatting (ruff format), linting (ruff), and type checking (mypy) run in pre-commit hooks and in [GitHub Actions](.github/workflows/ci.yml) on PRs to `staging` and `main`, alongside the pytest suite.
+
+```bash
+uv sync --group dev
+uv run pre-commit install          # one-time: enable the git hook
+uv run pre-commit run --all-files  # run all hooks manually
+uv run pytest --cov=aqueduct_cloud_functions --cov=main
+
 ## Deploy
 
 One source bundle, multiple entry points. Handlers live in [`main.py`](main.py) — repeat deploy with a different `--entry-point` per function (`cabq_ingest`, `pvacd_to_frost`, etc.).
