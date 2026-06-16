@@ -18,11 +18,13 @@ class FakeHydroVuClient:
         locations: list[dict[str, Any]],
         data_page: dict[str, Any],
         failing_location_ids: set[int] | None = None,
+        no_data_location_ids: set[int] | None = None,
     ) -> None:
-        """Serve canned locations/pages; fail for the configured location ids."""
+        """Serve canned pages; raise for failing ids, return [] for no-data ids."""
         self._locations = locations
         self._data_page = data_page
         self._failing = failing_location_ids or set()
+        self._no_data = no_data_location_ids or set()
 
     def list_locations(self) -> list[dict[str, Any]]:
         """Return the canned location list."""
@@ -35,9 +37,17 @@ class FakeHydroVuClient:
     def get_location_data(
         self, location_id: int, start_time: int, end_time: int
     ) -> list[dict[str, Any]]:
-        """Return one canned page, or raise for failing locations."""
+        """Return one canned page; raise on failing ids; [] on no-data ids.
+
+        Mirrors the real client, which returns ``[]`` for a 404 "no data"
+        response and raises ``HydroVuApiError`` (with ``status_code``) otherwise.
+        """
         if location_id in self._failing:
-            raise HydroVuApiError(f"GET /locations/{location_id}/data failed: 500")
+            raise HydroVuApiError(
+                f"GET /locations/{location_id}/data failed: 500", status_code=500
+            )
+        if location_id in self._no_data:
+            return []
         return [self._data_page]
 
     def close(self) -> None:
@@ -69,10 +79,16 @@ def make_fake_hydrovu(
 ) -> Callable[..., FakeHydroVuClient]:
     """Return a factory for FakeHydroVuClient seeded with the sample data."""
 
-    def _make(failing_location_ids: set[int] | None = None) -> FakeHydroVuClient:
-        """Build a fake client, optionally failing the given location ids."""
+    def _make(
+        failing_location_ids: set[int] | None = None,
+        no_data_location_ids: set[int] | None = None,
+    ) -> FakeHydroVuClient:
+        """Build a fake client, optionally failing or no-data'ing location ids."""
         return FakeHydroVuClient(
-            sample_locations, sample_data_page, failing_location_ids
+            sample_locations,
+            sample_data_page,
+            failing_location_ids,
+            no_data_location_ids,
         )
 
     return _make

@@ -122,12 +122,28 @@ def test_all_locations_failing_returns_ingest_failure(
     make_fake_hydrovu: Callable[..., FakeHydroVuClient],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """If every location fails, the CLI exits 1 and reports status error."""
+    """If every location fails with a real error, the CLI exits 1 (status error)."""
     patch_build["hydrovu"] = make_fake_hydrovu(failing_location_ids={123, 456})
     code = cli.main(["daily"])
 
     assert code == 1
     assert _result(capsys)["status"] == "error"
+
+
+def test_all_locations_no_data_returns_ok(
+    patch_build: dict[str, Any],
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If every location merely has no data, the CLI exits 0 (status ok)."""
+    patch_build["hydrovu"] = make_fake_hydrovu(no_data_location_ids={123, 456})
+    code = cli.main(["daily"])
+
+    assert code == 0
+    body = _result(capsys)
+    assert body["status"] == "ok"
+    assert body["locations_no_data"] == 2
+    assert body["errors"] == []
 
 
 def test_missing_configuration_returns_config_error(

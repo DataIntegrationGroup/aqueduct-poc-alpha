@@ -76,8 +76,10 @@ def run_pvacd_ingest(
 ) -> dict[str, Any]:
     """Fetch locations, friendly names, and per-location readings to GCS.
 
-    Location failures are collected, not fatal: every reachable location is
-    still staged and the failures are reported in the ``errors`` list.
+    A location with no readings in the window (HydroVu answers ``404``) is
+    is counted in ``locations_no_data`` and written nothing, not treated as
+    an error. Real per-location failures are collected: every other location
+    is still staged and the failures are reported in the ``errors`` list.
     """
     dt = end.strftime("%Y-%m-%d")
     prefix = f"raw/pvacd/dt={dt}"
@@ -91,6 +93,7 @@ def run_pvacd_ingest(
     )
 
     errors: list[dict[str, Any]] = []
+    no_data: list[int] = []
     readings_written = 0
     for location in locations:
         location_id = location["id"]
@@ -99,6 +102,10 @@ def run_pvacd_ingest(
         except HydroVuApiError as exc:
             logger.error("pvacd_ingest location=%s error=%s", location_id, exc)
             errors.append({"location_id": location_id, "error": str(exc)})
+            continue
+        if not pages:
+            logger.info("pvacd_ingest location=%s no data in window", location_id)
+            no_data.append(location_id)
             continue
         objects.append(
             gcs.write_json(
@@ -120,6 +127,15 @@ def run_pvacd_ingest(
         "end_time": end.isoformat(),
         "locations_count": len(locations),
         "readings_objects_written": readings_written,
+        "locations_no_data": len(no_data),
         "objects": objects,
         "errors": errors,
     }
+
+
+def ingest_failed(result: dict[str, Any]) -> bool:
+    """True when real errors prevented any readings from being staged.
+
+    A run where locations merely had no data (no ``errors``) is not a failure.
+    """
+    return bool(result["errors"]) and result["readings_objects_written"] == 0

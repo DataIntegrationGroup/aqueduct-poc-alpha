@@ -16,6 +16,7 @@ from aqueduct_cloud_functions.clients import (
 )
 from aqueduct_cloud_functions.pvacd import (
     build_clients,
+    ingest_failed,
     resolve_window,
     run_pvacd_ingest,
 )
@@ -68,7 +69,7 @@ def pvacd_ingest(request: Request) -> tuple[Any, int]:
     finally:
         hydrovu.close()
 
-    if result["locations_count"] > 0 and result["readings_objects_written"] == 0:
+    if ingest_failed(result):
         return ({**result, "status": "error"}, 502)
     return (result, 200)
 

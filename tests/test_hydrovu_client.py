@@ -137,13 +137,30 @@ def test_token_failure_raises_auth_error(httpx_mock: HTTPXMock) -> None:
         client.list_locations()
 
 
-def test_api_failure_raises_api_error(httpx_mock: HTTPXMock) -> None:
-    """A non-2xx API response raises HydroVuApiError."""
+def test_api_failure_raises_api_error_with_status_code(httpx_mock: HTTPXMock) -> None:
+    """A non-2xx API response raises HydroVuApiError carrying the status code."""
     add_token_response(httpx_mock)
     httpx_mock.add_response(
         method="GET",
         url=f"{API_BASE}/locations/123/data?startTime=100&endTime=200",
         status_code=500,
     )
-    with make_client() as client, pytest.raises(HydroVuApiError):
+    with make_client() as client, pytest.raises(HydroVuApiError) as excinfo:
         client.get_location_data(123, start_time=100, end_time=200)
+
+    assert excinfo.value.status_code == 500
+
+
+def test_get_location_data_returns_empty_on_404(httpx_mock: HTTPXMock) -> None:
+    """HydroVu's 404 "no results" response is a benign empty result, not an error."""
+    add_token_response(httpx_mock)
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{API_BASE}/locations/123/data?startTime=100&endTime=200",
+        status_code=404,
+        json={"status": "NOT_FOUND", "message": "No results were found"},
+    )
+    with make_client() as client:
+        pages = client.get_location_data(123, start_time=100, end_time=200)
+
+    assert pages == []

@@ -139,13 +139,48 @@ def test_all_locations_failing_returns_502(
     fake_clients: dict[str, Any],
     make_fake_hydrovu: Callable[..., FakeHydroVuClient],
 ) -> None:
-    """If every location fails, the run is reported as a 502."""
+    """If every location fails with a real error, the run is reported as a 502."""
     fake_clients["hydrovu"] = make_fake_hydrovu(failing_location_ids={123, 456})
     body, status = invoke(make_request())
 
     assert status == 502
     assert body["status"] == "error"
     assert len(body["errors"]) == 2
+
+
+def test_no_data_location_is_not_an_error(
+    fake_clients: dict[str, Any],
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
+) -> None:
+    """A location with no data is counted in locations_no_data, not errors."""
+    fake_clients["hydrovu"] = make_fake_hydrovu(no_data_location_ids={456})
+    body, status = invoke(make_request())
+
+    assert status == 200
+    assert body["status"] == "ok"
+    assert body["readings_objects_written"] == 1
+    assert body["locations_no_data"] == 1
+    assert body["errors"] == []
+
+    gcs: FakeGcsClient = fake_clients["gcs"]
+    dt = body["dt"]
+    assert f"raw/pvacd/dt={dt}/readings/location_123.json" in gcs.objects
+    assert f"raw/pvacd/dt={dt}/readings/location_456.json" not in gcs.objects
+
+
+def test_all_locations_no_data_returns_200(
+    fake_clients: dict[str, Any],
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
+) -> None:
+    """If every location merely has no data, the run is ok (not a 502)."""
+    fake_clients["hydrovu"] = make_fake_hydrovu(no_data_location_ids={123, 456})
+    body, status = invoke(make_request())
+
+    assert status == 200
+    assert body["status"] == "ok"
+    assert body["readings_objects_written"] == 0
+    assert body["locations_no_data"] == 2
+    assert body["errors"] == []
 
 
 def test_missing_configuration_returns_500(

@@ -202,6 +202,8 @@ raw/pvacd/dt=YYYY-MM-DD/readings/location_{id}.json     # raw readings pages per
 
 **Incremental approach:** no stored cursor — each run fetches a lookback window (default `PVACD_LOOKBACK_DAYS=1`) ending now. Object names are deterministic per `dt` partition, so re-runs overwrite in place, and the downstream FROST loader upserts by source key + observation time. Backfill is the same code path with a wider window.
 
+**No-data locations:** HydroVu returns `404 "No results were found for these filters"` for a location with no readings in the window (e.g. decommissioned or unprovisioned devices). These are benign — counted in `locations_no_data` and skipped, **not** reported in `errors`. A run only fails (HTTP 502 / CLI exit 1) when real errors leave nothing staged.
+
 Request parameters (query string or JSON body; body wins):
 
 | Field           | Type             | Meaning                                          |
@@ -273,7 +275,7 @@ Local [FROST-Server](https://hub.docker.com/r/fraunhoferiosb/frost-server/) (`2.
 
 ```bash
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD (and other vars if needed)
+# Edit .env: set needed secret values
 docker compose up -d
 ```
 

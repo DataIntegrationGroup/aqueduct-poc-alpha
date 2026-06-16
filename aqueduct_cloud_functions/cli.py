@@ -7,9 +7,7 @@ without standing up an HTTP server. Each subcommand maps to a load type::
     uv run pvacd-ingest backfill --days 31                     # 1-month backfill
     uv run pvacd-ingest range --start 2026-05-01 --end 2026-06-01
 
-All modes share the same code path
-(:func:`aqueduct_cloud_functions.pvacd.run_pvacd_ingest`); they differ only by
-the resolved time window. Results are printed as JSON; the process exit code is
+Results are printed as JSON; the process exit code is
 ``0`` on success, ``1`` on an upstream/ingest failure, and ``2`` on a
 configuration or window error.
 """
@@ -25,6 +23,7 @@ import pydantic
 from aqueduct_cloud_functions.clients import HydroVuApiError, HydroVuAuthError
 from aqueduct_cloud_functions.pvacd import (
     build_clients,
+    ingest_failed,
     resolve_window,
     run_pvacd_ingest,
 )
@@ -111,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         hydrovu.close()
 
-    if result["locations_count"] > 0 and result["readings_objects_written"] == 0:
+    if ingest_failed(result):
         result = {**result, "status": "error"}
 
     print(json.dumps(result, indent=2))

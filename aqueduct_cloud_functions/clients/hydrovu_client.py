@@ -19,7 +19,16 @@ class HydroVuAuthError(RuntimeError):
 
 
 class HydroVuApiError(RuntimeError):
-    """Raised when an authenticated API request fails."""
+    """Raised when an authenticated API request fails.
+
+    Carries the HTTP ``status_code`` (when known) so callers can distinguish a
+    ``404`` ("no data for these filters") from a real failure.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        """Store the message and the originating HTTP status code, if any."""
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class HydroVuClient:
@@ -65,12 +74,21 @@ class HydroVuClient:
         """Return raw readings pages for one location over a UTC epoch window.
 
         Pages are returned verbatim (unmerged) so the staged objects preserve
-        the API payloads exactly.
+        the API payloads exactly. HydroVu answers a location with no readings in
+        the window with ``404 "No results were found for these filters"``; that
+        is an empty result, so it is returned as ``[]`` rather than an error.
+        A successful response always yields at least one page, so an empty list
+        means "no data."
         """
-        return self._get_paginated(
-            f"/locations/{location_id}/data",
-            params={"startTime": str(start_time), "endTime": str(end_time)},
-        )
+        try:
+            return self._get_paginated(
+                f"/locations/{location_id}/data",
+                params={"startTime": str(start_time), "endTime": str(end_time)},
+            )
+        except HydroVuApiError as exc:
+            if exc.status_code == 404:
+                return []
+            raise
 
     def get_friendly_names(self) -> dict[str, Any]:
         """Return the parameter/unit friendly-name mappings."""
@@ -131,7 +149,8 @@ class HydroVuClient:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise HydroVuApiError(
-                f"GET {path} failed: {response.status_code} {response.text}"
+                f"GET {path} failed: {response.status_code} {response.text}",
+                status_code=response.status_code,
             ) from exc
         return response
 
