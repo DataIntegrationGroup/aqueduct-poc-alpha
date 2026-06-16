@@ -55,16 +55,24 @@ class FakeHydroVuClient:
 
 
 class FakeGcsClient:
-    """Records written objects instead of touching GCS."""
+    """In-memory stand-in for GcsStagingClient (no network)."""
 
-    def __init__(self) -> None:
-        """Start with an empty object store."""
-        self.objects: dict[str, Any] = {}
+    def __init__(self, objects: dict[str, Any] | None = None) -> None:
+        """Start from an optional seed of ``object_path -> payload``."""
+        self.objects: dict[str, Any] = dict(objects or {})
 
     def write_json(self, object_path: str, payload: Any) -> str:
         """Record the payload and return a fake gs:// URI."""
         self.objects[object_path] = payload
         return f"gs://test-bucket/{object_path}"
+
+    def read_json(self, object_path: str) -> Any:
+        """Return a previously stored payload."""
+        return self.objects[object_path]
+
+    def list_objects(self, prefix: str) -> list[str]:
+        """List stored object paths under ``prefix``."""
+        return [path for path in self.objects if path.startswith(prefix)]
 
 
 @pytest.fixture
@@ -144,3 +152,86 @@ def sample_friendly_names() -> dict[str, Any]:
         "parameters": {"4": "Depth to Water"},
         "units": {"35": "ft"},
     }
+
+
+@pytest.fixture
+def staged_dt() -> str:
+    """The dt partition the staged transform fixtures live under."""
+    return "2026-06-16"
+
+
+@pytest.fixture
+def staged_gcs(staged_dt: str) -> FakeGcsClient:
+    """A FakeGcsClient seeded with a staged PVACD partition.
+
+    Two wells are staged: location 123 has depth-to-water (param "4", metres)
+    plus a temperature reading (param "1", skipped); location 456 has only a
+    temperature reading and must be dropped (no DTW).
+    """
+    prefix = f"raw/pvacd/dt={staged_dt}"
+    return FakeGcsClient(
+        {
+            f"{prefix}/locations.json": [
+                {
+                    "id": 123,
+                    "name": "Zumwalt Well",
+                    "gps": {"latitude": 36.1, "longitude": -106.2, "elevation": 5400.0},
+                },
+                {
+                    "id": 456,
+                    "name": "Berrendo Well",
+                    "gps": {"latitude": 33.4, "longitude": -104.5, "elevation": 3600.0},
+                },
+            ],
+            f"{prefix}/friendly_names.json": {
+                "parameters": {"4": "Depth to Water"},
+                "units": {"35": "m"},
+            },
+            f"{prefix}/readings/location_123.json": {
+                "location_id": 123,
+                "start_time": 1748736000,
+                "end_time": 1748822400,
+                "pages": [
+                    {
+                        "locationId": 123,
+                        "parameters": [
+                            {
+                                "parameterId": "4",
+                                "unitId": "35",
+                                "readings": [
+                                    {"timestamp": 1748736000, "value": 10.0},
+                                    {"timestamp": 1748739600, "value": 10.5},
+                                ],
+                            },
+                            {
+                                "parameterId": "1",
+                                "unitId": "1",
+                                "readings": [
+                                    {"timestamp": 1748736000, "value": 22.5},
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+            f"{prefix}/readings/location_456.json": {
+                "location_id": 456,
+                "start_time": 1748736000,
+                "end_time": 1748822400,
+                "pages": [
+                    {
+                        "locationId": 456,
+                        "parameters": [
+                            {
+                                "parameterId": "1",
+                                "unitId": "1",
+                                "readings": [
+                                    {"timestamp": 1748736000, "value": 20.0},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+    )

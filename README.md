@@ -90,7 +90,8 @@ aqueduct-poc-alpha/
 │   ├── canonical/                  # SensorThings dataclasses, constants, BaseAdapter
 │   ├── adapters/                   # source → canonical mapping (CABQ, HydroVu)
 │   ├── clients/                    # GCS staging + HydroVu API (TODO: CKAN API)
-│   ├── loaders/                    # TODO — canonical → FROST API
+│   ├── loaders/                    # canonical → FROST SensorThings API
+│   ├── pvacd_transform.py          # staged GCS → canonical → FROST
 │   └── settings.py                 # pydantic-settings env config per handler
 ├── tests/                          # pytest suite (clients + handlers, no network)
 └── workflows/                      # TODO — orchestration YAML (backfill, daily batch)
@@ -143,7 +144,8 @@ for bundle in HydroVuAdapter().run():
     ...  # pass to FROST loader
 ```
 
-Implementation is stubbed with TODOs — same starting point as bravo.
+`HydroVuAdapter` is implemented (depth-to-water, metres -> feet). `CabqAdapter`
+is still stubbed with TODOs — same starting point as bravo.
 
 ## Technology
 
@@ -230,15 +232,39 @@ curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
   -d '{"lookback_days": 31}' | python3 -m json.tool   # 1-month backfill
 ```
 
-## Linting, typing, and tests
+## PVACD -> FROST transform
 
-Formatting (ruff format), linting (ruff), and type checking (mypy) run in pre-commit hooks and in [GitHub Actions](.github/workflows/ci.yml) on PRs to `staging` and `main`, alongside the pytest suite.
+`pvacd_to_frost` ([main.py](main.py)) reads a staged `dt` partition from GCS,
+maps it to the canonical model via `HydroVuAdapter`, and loads it into the local
+FROST SensorThings server over its v1.1 REST API:
+
+```
+GCS raw/pvacd/dt=YYYY-MM-DD/ -> HydroVuAdapter -> CanonicalBundle -> FrostLoader -> FROST
+```
+
+- **Scope:** depth-to-water (HydroVu `parameterId "4"`) -> one `pvacd-{id}-dtw`
+  datastream per well; values converted from metres to feet (`UNIT_FOOT`).
+- **Idempotent:** metadata (Location/Thing/Sensor/ObservedProperty/Datastream)
+  is upserted by `properties/externalId`; observations are de-duped against each
+  datastream's current max `phenomenonTime`, so re-running a partition is safe.
+
+Needs a reachable bucket (ADC) and a running FROST (see [Local FROST](#local-frost)).
+Config: `GCS_BUCKET_NAME` and `FROST_SERVICE_ROOT_URL`.
+
+As a CLI (transforms one `dt` partition; defaults to today UTC):
 
 ```bash
-uv sync --group dev
-uv run pre-commit install          # one-time: enable the git hook
-uv run pre-commit run --all-files  # run all hooks manually
-uv run pytest --cov=aqueduct_cloud_functions --cov=main
+uv run pvacd-to-frost                   # today's partition
+uv run pvacd-to-frost --dt 2026-06-01   # an explicit partition
+```
+
+Or as the HTTP function (`dt` via query string or JSON body):
+
+```bash
+uv run functions-framework --target=pvacd_to_frost --debug
+curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
+  -d '{"dt": "2026-06-01"}' | python3 -m json.tool
+```
 
 ## Deploy
 

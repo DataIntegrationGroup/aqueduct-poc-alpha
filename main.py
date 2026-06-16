@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import functions_framework
@@ -20,7 +20,14 @@ from aqueduct_cloud_functions.pvacd import (
     resolve_window,
     run_pvacd_ingest,
 )
-from aqueduct_cloud_functions.settings import PvacdIngestSettings
+from aqueduct_cloud_functions.pvacd_transform import (
+    build_clients as build_transform_clients,
+)
+from aqueduct_cloud_functions.pvacd_transform import (
+    run_pvacd_to_frost,
+    transform_failed,
+)
+from aqueduct_cloud_functions.settings import FrostLoadSettings, PvacdIngestSettings
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +55,7 @@ def _parse_window(
 
 @functions_framework.http
 def pvacd_ingest(request: Request) -> tuple[Any, int]:
-    """PVACD HydroVu ingest → GCS staging."""
+    """PVACD HydroVu ingest -> GCS staging."""
     try:
         settings = PvacdIngestSettings()
     except pydantic.ValidationError as exc:
@@ -81,12 +88,49 @@ def cabq_ingest(request: Request) -> tuple[Any, int]:
     return ("", 501)
 
 
+def _parse_dt(request: Request) -> str:
+    """Resolve the ``dt`` partition (``YYYY-MM-DD``) to transform.
+
+    Reads ``dt`` from the query string or JSON body; defaults to
+    today (UTC). Raises ValueError on a malformed value.
+    """
+    params: dict[str, Any] = dict(request.args)
+    body = request.get_json(silent=True)
+    if isinstance(body, dict):
+        params.update(body)
+    dt = params.get("dt")
+    if dt is None:
+        return datetime.now(tz=UTC).strftime("%Y-%m-%d")
+    datetime.strptime(str(dt), "%Y-%m-%d")  # validate format
+    return str(dt)
+
+
 @functions_framework.http
 def pvacd_to_frost(request: Request) -> tuple[Any, int]:
     """PVACD staged GCS data → canonical model → FROST."""
-    # TODO: implement (lazy-import adapter inside handler when ready)
-    # from aqueduct_cloud_functions.adapters import HydroVuAdapter
-    return ("", 501)
+    try:
+        settings = FrostLoadSettings()
+    except pydantic.ValidationError as exc:
+        logger.error("pvacd_to_frost missing configuration: %s", exc)
+        return ({"status": "error", "message": f"missing configuration: {exc}"}, 500)
+
+    try:
+        dt = _parse_dt(request)
+    except ValueError as exc:
+        return ({"status": "error", "message": str(exc)}, 400)
+
+    gcs, frost = build_transform_clients(settings)
+    try:
+        result = run_pvacd_to_frost(gcs, frost, dt)
+    except Exception as exc:  # noqa: BLE001 - surface GCS/FROST failures as 502
+        logger.error("pvacd_to_frost transform failure: %s", exc)
+        return ({"status": "error", "message": str(exc)}, 502)
+    finally:
+        frost.close()
+
+    if transform_failed(result):
+        return ({**result, "status": "error"}, 502)
+    return (result, 200)
 
 
 @functions_framework.http

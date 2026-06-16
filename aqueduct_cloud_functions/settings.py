@@ -21,3 +21,12 @@ class PvacdIngestSettings(BaseSettings):
     hydrovu_api_base_url: str = "https://www.hydrovu.com/public-api/v1"
     gcs_bucket_name: str
     pvacd_lookback_days: int = 1
+
+
+class FrostLoadSettings(BaseSettings):
+    """Configuration for the staging -> FROST transform handlers."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    gcs_bucket_name: str
+    frost_service_root_url: str = "http://localhost:8080/FROST-Server/v1.1"

@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 pvacd-ingest = "aqueduct_cloud_functions.cli:main"
+pvacd-to-frost = "aqueduct_cloud_functions.transform_cli:main"
 
 [build-system]
 requires = ["hatchling"]

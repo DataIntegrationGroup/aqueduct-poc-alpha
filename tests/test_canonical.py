@@ -47,11 +47,11 @@ def test_canonical_thing_carries_location_and_agency() -> None:
 
 def test_adapters_set_their_agency_codes() -> None:
     """Each adapter initializes with its uppercased agency code."""
-    assert HydroVuAdapter().agency == "PVACD"
+    assert HydroVuAdapter([]).agency == "PVACD"
     assert CabqAdapter().agency == "CABQ"
 
 
-def test_adapter_stub_methods_raise_not_implemented() -> None:
-    """Unimplemented adapter mapping methods fail loudly, not silently."""
+def test_cabq_adapter_stub_methods_raise_not_implemented() -> None:
+    """The not-yet-implemented CABQ adapter mapping fails loudly, not silently."""
     with pytest.raises(NotImplementedError):
-        HydroVuAdapter().to_thing({})
+        CabqAdapter().to_thing({})
