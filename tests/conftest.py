@@ -2,9 +2,80 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
+
+from aqueduct_cloud_functions.clients import HydroVuApiError
+
+
+class FakeHydroVuClient:
+    """In-memory stand-in for HydroVuClient (no network)."""
+
+    def __init__(
+        self,
+        locations: list[dict[str, Any]],
+        data_page: dict[str, Any],
+        failing_location_ids: set[int] | None = None,
+    ) -> None:
+        """Serve canned locations/pages; fail for the configured location ids."""
+        self._locations = locations
+        self._data_page = data_page
+        self._failing = failing_location_ids or set()
+
+    def list_locations(self) -> list[dict[str, Any]]:
+        """Return the canned location list."""
+        return self._locations
+
+    def get_friendly_names(self) -> dict[str, Any]:
+        """Return a canned friendly-names payload."""
+        return {"parameters": {"4": "Depth to Water"}, "units": {"35": "ft"}}
+
+    def get_location_data(
+        self, location_id: int, start_time: int, end_time: int
+    ) -> list[dict[str, Any]]:
+        """Return one canned page, or raise for failing locations."""
+        if location_id in self._failing:
+            raise HydroVuApiError(f"GET /locations/{location_id}/data failed: 500")
+        return [self._data_page]
+
+    def close(self) -> None:
+        """No-op for interface parity with the real client."""
+
+
+class FakeGcsClient:
+    """Records written objects instead of touching GCS."""
+
+    def __init__(self) -> None:
+        """Start with an empty object store."""
+        self.objects: dict[str, Any] = {}
+
+    def write_json(self, object_path: str, payload: Any) -> str:
+        """Record the payload and return a fake gs:// URI."""
+        self.objects[object_path] = payload
+        return f"gs://test-bucket/{object_path}"
+
+
+@pytest.fixture
+def fake_gcs() -> FakeGcsClient:
+    """A fresh recording GCS client."""
+    return FakeGcsClient()
+
+
+@pytest.fixture
+def make_fake_hydrovu(
+    sample_locations: list[dict[str, Any]], sample_data_page: dict[str, Any]
+) -> Callable[..., FakeHydroVuClient]:
+    """Return a factory for FakeHydroVuClient seeded with the sample data."""
+
+    def _make(failing_location_ids: set[int] | None = None) -> FakeHydroVuClient:
+        """Build a fake client, optionally failing the given location ids."""
+        return FakeHydroVuClient(
+            sample_locations, sample_data_page, failing_location_ids
+        )
+
+    return _make
 
 
 @pytest.fixture

@@ -210,7 +210,17 @@ Request parameters (query string or JSON body; body wins):
 | `start_date`    | date `YYYY-MM-DD` | Explicit window start (UTC midnight)             |
 | `end_date`      | date `YYYY-MM-DD` | Explicit window end / `dt` partition             |
 
-**Run locally** (needs `.env` with HydroVu credentials and a reachable bucket via ADC):
+**Run locally** (needs `.env` with HydroVu credentials and a reachable bucket via ADC).
+
+As a CLI — the same ingest, one subcommand per load type (no HTTP server):
+
+```bash
+uv run pvacd-ingest daily                              # incremental (PVACD_LOOKBACK_DAYS)
+uv run pvacd-ingest backfill --days 31                 # 1-month backfill
+uv run pvacd-ingest range --start 2026-05-01 --end 2026-06-01
+```
+
+Or as the HTTP function (mirrors the deployed entry point):
 
 ```bash
 uv run functions-framework --target=pvacd_ingest --debug

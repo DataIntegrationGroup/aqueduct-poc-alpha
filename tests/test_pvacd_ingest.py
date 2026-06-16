@@ -2,63 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, cast
 
 import pytest
+from conftest import FakeGcsClient, FakeHydroVuClient
 from flask import Request
 from werkzeug.test import EnvironBuilder
 
 import main
-from aqueduct_cloud_functions.clients import HydroVuApiError
 from aqueduct_cloud_functions.settings import PvacdIngestSettings
-
-
-class FakeHydroVuClient:
-    """In-memory stand-in for HydroVuClient."""
-
-    def __init__(
-        self,
-        locations: list[dict[str, Any]],
-        data_page: dict[str, Any],
-        failing_location_ids: set[int] | None = None,
-    ) -> None:
-        """Serve canned locations/pages; fail for the configured location ids."""
-        self._locations = locations
-        self._data_page = data_page
-        self._failing = failing_location_ids or set()
-
-    def list_locations(self) -> list[dict[str, Any]]:
-        """Return the canned location list."""
-        return self._locations
-
-    def get_friendly_names(self) -> dict[str, Any]:
-        """Return a canned friendly-names payload."""
-        return {"parameters": {"4": "Depth to Water"}, "units": {"35": "ft"}}
-
-    def get_location_data(
-        self, location_id: int, start_time: int, end_time: int
-    ) -> list[dict[str, Any]]:
-        """Return one canned page, or raise for failing locations."""
-        if location_id in self._failing:
-            raise HydroVuApiError(f"GET /locations/{location_id}/data failed: 500")
-        return [self._data_page]
-
-    def close(self) -> None:
-        """No-op for interface parity with the real client."""
-
-
-class FakeGcsClient:
-    """Records written objects instead of touching GCS."""
-
-    def __init__(self) -> None:
-        """Start with an empty object store."""
-        self.objects: dict[str, Any] = {}
-
-    def write_json(self, object_path: str, payload: Any) -> str:
-        """Record the payload and return a fake gs:// URI."""
-        self.objects[object_path] = payload
-        return f"gs://test-bucket/{object_path}"
 
 
 def make_request(
@@ -81,14 +35,11 @@ def invoke(request: Request) -> tuple[dict[str, Any], int]:
 def fake_clients(
     monkeypatch: pytest.MonkeyPatch,
     ingest_env: None,
-    sample_locations: list[dict[str, Any]],
-    sample_data_page: dict[str, Any],
+    fake_gcs: FakeGcsClient,
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
 ) -> dict[str, Any]:
-    """Patch main._build_clients to return fakes; expose them for assertions."""
-    holder: dict[str, Any] = {
-        "hydrovu": FakeHydroVuClient(sample_locations, sample_data_page),
-        "gcs": FakeGcsClient(),
-    }
+    """Patch main.build_clients to return fakes; expose them for assertions."""
+    holder: dict[str, Any] = {"hydrovu": make_fake_hydrovu(), "gcs": fake_gcs}
 
     def _fake_build(
         settings: PvacdIngestSettings,
@@ -96,7 +47,7 @@ def fake_clients(
         """Return the pre-built fakes regardless of settings."""
         return holder["hydrovu"], holder["gcs"]
 
-    monkeypatch.setattr(main, "_build_clients", _fake_build)
+    monkeypatch.setattr(main, "build_clients", _fake_build)
     return holder
 
 
@@ -172,13 +123,10 @@ def test_inverted_window_returns_400(fake_clients: dict[str, Any]) -> None:
 
 def test_partial_failure_returns_200_with_errors(
     fake_clients: dict[str, Any],
-    sample_locations: list[dict[str, Any]],
-    sample_data_page: dict[str, Any],
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
 ) -> None:
     """One failing location is reported in errors; the rest still stage."""
-    fake_clients["hydrovu"] = FakeHydroVuClient(
-        sample_locations, sample_data_page, failing_location_ids={456}
-    )
+    fake_clients["hydrovu"] = make_fake_hydrovu(failing_location_ids={456})
     body, status = invoke(make_request())
 
     assert status == 200
@@ -189,13 +137,10 @@ def test_partial_failure_returns_200_with_errors(
 
 def test_all_locations_failing_returns_502(
     fake_clients: dict[str, Any],
-    sample_locations: list[dict[str, Any]],
-    sample_data_page: dict[str, Any],
+    make_fake_hydrovu: Callable[..., FakeHydroVuClient],
 ) -> None:
     """If every location fails, the run is reported as a 502."""
-    fake_clients["hydrovu"] = FakeHydroVuClient(
-        sample_locations, sample_data_page, failing_location_ids={123, 456}
-    )
+    fake_clients["hydrovu"] = make_fake_hydrovu(failing_location_ids={123, 456})
     body, status = invoke(make_request())
 
     assert status == 502
