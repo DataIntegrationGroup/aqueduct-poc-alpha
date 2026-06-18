@@ -1,0 +1,27 @@
+{
+  "displayName": "PVACD pipeline: staleness (no successful run in 24h)",
+  "documentation": {
+    "content": "No `pvacd-daily` Cloud Workflows execution has finished with status `SUCCEEDED` in the last 24 hours.\n\nThis is the data-**freshness** signal: the daily batch is expected to land a new partition every day, so a full day with no successful run means downstream FROST data is going stale even if no single run threw a hard error (e.g. the Scheduler job is paused, or every attempt is silently retried out).\n\n**Note:** this keys off Workflow success and needs no application change. For per-partition freshness (age of the newest `dt` actually loaded to FROST), add the optional log-based metric described in `monitoring/README.md`.\n\n**Triage:** check Cloud Scheduler (is the `pvacd-daily` job enabled and firing?) and the most recent Workflow executions.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "No SUCCEEDED pvacd-daily execution for 24h",
+      "conditionAbsent": {
+        "filter": "resource.type = \"workflows.googleapis.com/Workflow\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status = \"SUCCEEDED\" AND resource.labels.workflow_id = \"pvacd-daily\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "3600s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.workflow_id"]
+          }
+        ],
+        "duration": "86400s",
+        "trigger": {"count": 1}
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"}
+}

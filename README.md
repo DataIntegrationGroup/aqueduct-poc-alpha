@@ -94,7 +94,9 @@ aqueduct-poc-alpha/
 │   ├── pvacd_transform.py          # staged GCS → canonical → FROST
 │   └── settings.py                 # pydantic-settings env config per handler
 ├── tests/                          # pytest suite (clients + handlers, no network)
-└── workflows/                      # TODO — orchestration YAML (backfill, daily batch)
+├── workflows/                      # Cloud Workflows orchestration (pvacd_daily.yaml)
+├── monitoring/                     # Cloud Monitoring dashboard + alert policies (JSON)
+└── deploy/                         # gcloud runbook scripts (FROST in GCP + functions + orchestration)
 ```
 
 - **Local dev:** `uv sync` for deps; run from repo root — `from aqueduct_cloud_functions.adapters import ...` just works
@@ -268,6 +270,29 @@ curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
 
 ## Deploy
 
+### Full GCP deploy: orchestrated + monitored
+
+The [`deploy/`](deploy/) scripts stand up the whole GCP-native pipeline:
+ingest -> GCS -> transform -> FROST, with FROST hosted in GCP (Cloud Run +
+Cloud SQL/PostGIS), a [Cloud Workflow](workflows/pvacd_daily.yaml) chaining the
+two functions, a daily Cloud Scheduler trigger, and the
+[Cloud Monitoring](monitoring/) dashboard + alerts. Everything runs and is
+observed in-cloud (not local or externally hosted). See the
+[deploy runbook](deploy/README.md) for prerequisites, ordering, verification,
+and teardown.
+
+```bash
+export PROJECT_ID=<project>        # and optionally REGION, GCS_BUCKET_NAME
+./deploy/10_infra.sh               # APIs, VPC + connector + NAT, Cloud SQL, bucket
+./deploy/20_frost.sh               # FROST-Server on Cloud Run, wired to Cloud SQL
+HYDROVU_CLIENT_ID=... HYDROVU_CLIENT_SECRET=... \
+  ./deploy/30_functions.sh         # SAs, IAM, secrets, deploy both functions
+./deploy/40_orchestration.sh       # Cloud Workflow + Cloud Scheduler
+./deploy/50_monitoring.sh          # dashboard + sync-failure/freshness/error alerts
+```
+
+### Single function (manual)
+
 One source bundle, multiple entry points. Handlers live in [`main.py`](main.py) — repeat deploy with a different `--entry-point` per function (`cabq_ingest`, `pvacd_to_frost`, etc.).
 
 HydroVu credentials live in Secret Manager and reach the function as env vars via `--set-secrets` (one-time setup):
@@ -324,5 +349,9 @@ curl -X POST -H "Content-Type: application/json" -d @demoEntities.json \
 docker compose down -v
 ```
 
-**Pipeline integration:** write and query through the SensorThings HTTP API on FROST (e.g. `http://localhost:8080/FROST-Server/v1.1/...` with `httpx`). 
-Running locally like this will probably not work for trying the functions when they are running in GCP, we can try to host a sample version of FROST-Server in GCP for this POC when we get to that task.
+**Pipeline integration:** write and query through the SensorThings HTTP API on FROST (e.g. `http://localhost:8080/FROST-Server/v1.1/...` with `httpx`).
+
+This local FROST is for local development only — a Cloud-deployed function can't
+reach your laptop's `localhost`. For functions running in GCP, FROST is hosted in
+GCP (Cloud Run + Cloud SQL) by [`deploy/20_frost.sh`](deploy/20_frost.sh); see
+the [deploy runbook](deploy/README.md).

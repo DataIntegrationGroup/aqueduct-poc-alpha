@@ -1,0 +1,29 @@
+{
+  "displayName": "PVACD pipeline — sync failure (Workflow execution FAILED)",
+  "documentation": {
+    "content": "A `pvacd-daily` Cloud Workflows execution finished with status `FAILED`.\n\nThis is the top-level sync-failure signal for the PVACD pipeline: it fires when the orchestration (ingest -> transform) could not complete a run, whether the failure came from the ingest function, the transform function, or the workflow itself.\n\n**Triage:** open the failed execution in Workflows, then the logs of the step that raised. Common causes: HydroVu auth/credentials, the transform unable to reach FROST on Cloud Run (VPC egress / FROST down), or Cloud SQL unavailable.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "pvacd-daily FAILED executions > 0",
+      "conditionThreshold": {
+        "filter": "resource.type = \"workflows.googleapis.com/Workflow\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status = \"FAILED\" AND resource.labels.workflow_id = \"pvacd-daily\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "600s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.workflow_id"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {"count": 1}
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"}
+}
