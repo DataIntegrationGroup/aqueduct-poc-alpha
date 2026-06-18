@@ -1,0 +1,93 @@
+# PVACD daily orchestration: HydroVu -> GCS ingest, then GCS -> FROST transform.
+#
+# One execution = one daily batch. The two Cloud Functions Gen2 handlers
+# (`pvacd_ingest`, `pvacd_to_frost` in main.py) are deployed
+# `--no-allow-unauthenticated`; this workflow's service account invokes them
+# directly with an OIDC token (`auth: {type: OIDC}`), so nothing is publicly
+# exposed.
+#
+# Deploy:
+#   gcloud workflows deploy pvacd-daily \
+#     --source=workflows/pvacd_daily.yaml \
+#     --location="$REGION" \
+#     --service-account="$WORKFLOW_SA"
+#
+# Daily run is triggered by Cloud Scheduler (deploy/40_scheduler_monitoring.sh).
+# Backfill is the SAME workflow invoked with a wider window, e.g. a 1-month
+# backfill:
+#   gcloud workflows run pvacd-daily --location="$REGION" \
+#     --data='{"lookback_days": 31}'
+# or an explicit date range:
+#   gcloud workflows run pvacd-daily --location="$REGION" \
+#     --data='{"start_date": "2026-05-01", "end_date": "2026-06-01"}'
+
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          # `args` is null when the workflow is run with no input; normalize it.
+          - input: ${default(args, {})}
+          - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - region: ${default(map.get(input, "region"), sys.get_env("GOOGLE_CLOUD_LOCATION"))}
+          - lookback_days: ${default(map.get(input, "lookback_days"), 1)}
+          - ingest_url: ${default(map.get(input, "ingest_url"), "https://" + region + "-" + project + ".cloudfunctions.net/pvacd-ingest")}
+          - transform_url: ${default(map.get(input, "transform_url"), "https://" + region + "-" + project + ".cloudfunctions.net/pvacd-to-frost")}
+          - ingest_body: ${input}
+          - ingest_body.lookback_days: ${lookback_days}
+
+    - ingest:
+        try:
+          call: http.post
+          args:
+            url: ${ingest_url}
+            auth:
+              type: OIDC
+            timeout: 540
+            body: ${ingest_body}
+          result: ingest_resp
+        retry:
+          predicate: ${http.default_retry_predicate}
+          max_retries: 3
+          backoff:
+            initial_delay: 5
+            max_delay: 60
+            multiplier: 2
+
+    # The handler returns HTTP 200 with status:"ok"; a partial failure comes back
+    # 502 (handled by the retry/predicate above). Fail the e\xecution if the body
+    # is not ok, so the sync-failure alert fires.
+    - check_ingest:
+        switch:
+          - condition: ${ingest_resp.body.status != "ok"}
+            raise: '${"ingest did not succeed: " + json.encode_to_string(ingest_resp.body)}'
+
+    - transform:
+        try:
+          call: http.post
+          args:
+            url: ${transform_url}
+            auth:
+              type: OIDC
+            timeout: 540
+            body:
+              dt: ${ingest_resp.body.dt}
+          result: transform_resp
+        retry:
+          predicate: ${http.default_retry_predicate}
+          max_retries: 3
+          backoff:
+            initial_delay: 5
+            max_delay: 60
+            multiplier: 2
+
+    - check_transform:
+        switch:
+          - condition: ${transform_resp.body.status != "ok"}
+            raise: '${"transform did not succeed: " + json.encode_to_string(transform_resp.body)}'
+
+    - done:
+        return:
+          dt: ${ingest_resp.body.dt}
+          ingest: ${ingest_resp.body}
+          transform: ${transform_resp.body}

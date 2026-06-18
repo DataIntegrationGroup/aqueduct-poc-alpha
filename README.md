@@ -1,5 +1,9 @@
 # Aqueduct POC A (`aqueduct-poc-alpha`)
 
+[![CI](https://github.com/DataIntegrationGroup/aqueduct-poc-alpha/actions/workflows/ci.yml/badge.svg)](https://github.com/DataIntegrationGroup/aqueduct-poc-alpha/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
+
 Scratch repo for a GCP-native proof of concept that ingests **PVACD HydroVu** and **City of Albuquerque (CABQ) CKAN** data, lands it in **GCS** in a staging form, transforms via a **canonical model agreement** into **SensorThings**, and exposes data through a **local FROST** instance spun up via docker compose.
 
 ## Why this repo exists
@@ -85,9 +89,14 @@ aqueduct-poc-alpha/
 ├── aqueduct_cloud_functions/       # shared package (mirrors bravo's aqueduct_dagster/)
 │   ├── canonical/                  # SensorThings dataclasses, constants, BaseAdapter
 │   ├── adapters/                   # source → canonical mapping (CABQ, HydroVu)
-│   ├── clients/                    # TODO — GCS, HydroVu API, CKAN API
-│   └── loaders/                    # TODO — canonical → FROST API
-└── workflows/                      # TODO — orchestration YAML (backfill, daily batch)
+│   ├── clients/                    # GCS staging + HydroVu API (TODO: CKAN API)
+│   ├── loaders/                    # canonical → FROST SensorThings API
+│   ├── pvacd_transform.py          # staged GCS → canonical → FROST
+│   └── settings.py                 # pydantic-settings env config per handler
+├── tests/                          # pytest suite (clients + handlers, no network)
+├── workflows/                      # Cloud Workflows orchestration (pvacd_daily.yaml)
+├── monitoring/                     # Cloud Monitoring dashboard + alert policies (JSON)
+└── deploy/                         # gcloud runbook scripts (FROST in GCP + functions + orchestration)
 ```
 
 - **Local dev:** `uv sync` for deps; run from repo root — `from aqueduct_cloud_functions.adapters import ...` just works
@@ -137,7 +146,8 @@ for bundle in HydroVuAdapter().run():
     ...  # pass to FROST loader
 ```
 
-Implementation is stubbed with TODOs — same starting point as bravo.
+`HydroVuAdapter` is implemented (depth-to-water, metres -> feet). `CabqAdapter`
+is still stubbed with TODOs — same starting point as bravo.
 
 ## Technology
 
@@ -169,6 +179,9 @@ Add new packages with `uv add <package>`, then re-export.
 - `pytest` — unit and integration tests
 - `pytest-cov` — test coverage reports
 - `pytest-httpx` — mock HTTP responses in tests
+- `ruff` — formatting and linting
+- `mypy` — static type checking
+- `pre-commit` — runs ruff + mypy before each commit
 
 ## Linting, typing, and tests
 
@@ -179,15 +192,123 @@ uv sync --group dev
 uv run pre-commit install          # one-time: enable the git hook
 uv run pre-commit run --all-files  # run all hooks manually
 uv run pytest --cov=aqueduct_cloud_functions --cov=main
+```
+
+## PVACD HydroVu ingest
+
+`pvacd_ingest` ([main.py](main.py)) pulls from the [HydroVu public API](https://www.hydrovu.com/public-api/docs/) (OAuth2 client credentials) and stages raw JSON in GCS:
+
+```
+raw/pvacd/dt=YYYY-MM-DD/locations.json                  # all account locations
+raw/pvacd/dt=YYYY-MM-DD/friendly_names.json             # parameterId/unitId → names
+raw/pvacd/dt=YYYY-MM-DD/readings/location_{id}.json     # raw readings pages per location
+```
+
+**Incremental approach:** no stored cursor — each run fetches a lookback window (default `PVACD_LOOKBACK_DAYS=1`) ending now. Object names are deterministic per `dt` partition, so re-runs overwrite in place, and the downstream FROST loader upserts by source key + observation time. Backfill is the same code path with a wider window.
+
+**No-data locations:** HydroVu returns `404 "No results were found for these filters"` for a location with no readings in the window (e.g. decommissioned or unprovisioned devices). These are benign — counted in `locations_no_data` and skipped, **not** reported in `errors`. A run only fails (HTTP 502 / CLI exit 1) when real errors leave nothing staged.
+
+Request parameters (query string or JSON body; body wins):
+
+| Field           | Type             | Meaning                                          |
+| --------------- | ---------------- | ------------------------------------------------ |
+| `lookback_days` | int              | Window ending now (default `PVACD_LOOKBACK_DAYS`) |
+| `start_date`    | date `YYYY-MM-DD` | Explicit window start (UTC midnight)             |
+| `end_date`      | date `YYYY-MM-DD` | Explicit window end / `dt` partition             |
+
+**Run locally** (needs `.env` with HydroVu credentials and a reachable bucket via ADC).
+
+As a CLI — the same ingest, one subcommand per load type (no HTTP server):
+
+```bash
+uv run pvacd-ingest daily                              # incremental (PVACD_LOOKBACK_DAYS)
+uv run pvacd-ingest backfill --days 31                 # 1-month backfill
+uv run pvacd-ingest range --start 2026-05-01 --end 2026-06-01
+```
+
+Or as the HTTP function (mirrors the deployed entry point):
+
+```bash
+uv run functions-framework --target=pvacd_ingest --debug
+curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
+  -d '{"lookback_days": 31}' | python3 -m json.tool   # 1-month backfill
+```
+
+## PVACD -> FROST transform
+
+`pvacd_to_frost` ([main.py](main.py)) reads a staged `dt` partition from GCS,
+maps it to the canonical model via `HydroVuAdapter`, and loads it into the local
+FROST SensorThings server over its v1.1 REST API:
+
+```
+GCS raw/pvacd/dt=YYYY-MM-DD/ -> HydroVuAdapter -> CanonicalBundle -> FrostLoader -> FROST
+```
+
+- **Scope:** depth-to-water (HydroVu `parameterId "4"`) -> one `pvacd-{id}-dtw`
+  datastream per well; values converted from metres to feet (`UNIT_FOOT`).
+- **Idempotent:** metadata (Location/Thing/Sensor/ObservedProperty/Datastream)
+  is upserted by `properties/externalId`; observations are de-duped against each
+  datastream's current max `phenomenonTime`, so re-running a partition is safe.
+
+Needs a reachable bucket (ADC) and a running FROST (see [Local FROST](#local-frost)).
+Config: `GCS_BUCKET_NAME` and `FROST_SERVICE_ROOT_URL`.
+
+As a CLI (transforms one `dt` partition; defaults to today UTC):
+
+```bash
+uv run pvacd-to-frost                   # today's partition
+uv run pvacd-to-frost --dt 2026-06-01   # an explicit partition
+```
+
+Or as the HTTP function (`dt` via query string or JSON body):
+
+```bash
+uv run functions-framework --target=pvacd_to_frost --debug
+curl -s -X POST localhost:8080 -H 'Content-Type: application/json' \
+  -d '{"dt": "2026-06-01"}' | python3 -m json.tool
+```
 
 ## Deploy
 
-One source bundle, multiple entry points. Handlers live in [`main.py`](main.py) — repeat deploy with a different `--entry-point` per function (`cabq_ingest`, `pvacd_to_frost`, etc.).
+### Full GCP deploy: orchestrated + monitored
+
+The [`deploy/`](deploy/) scripts stand up the whole GCP-native pipeline:
+ingest -> GCS -> transform -> FROST, with FROST hosted in GCP (Cloud Run +
+Cloud SQL/PostGIS), a [Cloud Workflow](workflows/pvacd_daily.yaml) chaining the
+two functions, a daily Cloud Scheduler trigger, and the
+[Cloud Monitoring](monitoring/) dashboard + alerts. Everything runs and is
+observed in-cloud (not local or externally hosted). See the
+[deploy runbook](deploy/README.md) for prerequisites, ordering, verification,
+and teardown.
 
 ```bash
-gcloud functions deploy pvacd_ingest \
+export PROJECT_ID=<project>        # and optionally REGION, GCS_BUCKET_NAME
+./deploy/10_infra.sh               # APIs, VPC + connector + NAT, Cloud SQL, bucket
+./deploy/20_frost.sh               # FROST-Server on Cloud Run, wired to Cloud SQL
+HYDROVU_CLIENT_ID=... HYDROVU_CLIENT_SECRET=... \
+  ./deploy/30_functions.sh         # SAs, IAM, secrets, deploy both functions
+./deploy/40_orchestration.sh       # Cloud Workflow + Cloud Scheduler
+./deploy/50_monitoring.sh          # dashboard + sync-failure/freshness/error alerts
+```
+
+### Single function (manual)
+
+One source bundle, multiple entry points. Handlers live in [`main.py`](main.py) — repeat deploy with a different `--entry-point` per function (`cabq_ingest`, `pvacd_to_frost`, etc.).
+
+HydroVu credentials live in Secret Manager and reach the function as env vars via `--set-secrets` (one-time setup):
+
+```bash
+printf '%s' "$HYDROVU_CLIENT_ID" | gcloud secrets create hydrovu-client-id --data-file=-
+printf '%s' "$HYDROVU_CLIENT_SECRET" | gcloud secrets create hydrovu-client-secret --data-file=-
+```
+
+```bash
+gcloud functions deploy pvacd-ingest \
   --gen2 --source=. --entry-point=pvacd_ingest \
-  --runtime=python313 --trigger-http ...
+  --runtime=python313 --trigger-http --no-allow-unauthenticated \
+  --timeout=540s \
+  --set-env-vars GCS_BUCKET_NAME=<bucket>,PVACD_LOOKBACK_DAYS=1 \
+  --set-secrets HYDROVU_CLIENT_ID=hydrovu-client-id:latest,HYDROVU_CLIENT_SECRET=hydrovu-client-secret:latest
 ```
 
 ## Prerequisites
@@ -205,7 +326,7 @@ Local [FROST-Server](https://hub.docker.com/r/fraunhoferiosb/frost-server/) (`2.
 
 ```bash
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD (and other vars if needed)
+# Edit .env: set needed secret values
 docker compose up -d
 ```
 
@@ -228,5 +349,9 @@ curl -X POST -H "Content-Type: application/json" -d @demoEntities.json \
 docker compose down -v
 ```
 
-**Pipeline integration:** write and query through the SensorThings HTTP API on FROST (e.g. `http://localhost:8080/FROST-Server/v1.1/...` with `httpx`). 
-Running locally like this will probably not work for trying the functions when they are running in GCP, we can try to host a sample version of FROST-Server in GCP for this POC when we get to that task.
+**Pipeline integration:** write and query through the SensorThings HTTP API on FROST (e.g. `http://localhost:8080/FROST-Server/v1.1/...` with `httpx`).
+
+This local FROST is for local development only — a Cloud-deployed function can't
+reach your laptop's `localhost`. For functions running in GCP, FROST is hosted in
+GCP (Cloud Run + Cloud SQL) by [`deploy/20_frost.sh`](deploy/20_frost.sh); see
+the [deploy runbook](deploy/README.md).

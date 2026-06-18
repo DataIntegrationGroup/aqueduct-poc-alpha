@@ -1,0 +1,29 @@
+{
+  "displayName": "PVACD functions: 5xx error responses",
+  "documentation": {
+    "content": "One of the PVACD Cloud Functions (`pvacd-ingest` / `pvacd-to-frost`, which run as Cloud Run services) returned a `5xx` response.\n\nThis is the per-function **error** signal, finer-grained than the workflow-level sync-failure alert: a function can 5xx and be retried by the workflow, so this can fire even when the overall run eventually succeeds. Useful for catching upstream flakiness (HydroVu 5xx, FROST/Cloud SQL hiccups) before it turns into a full sync failure.\n\n**Tuning:** the threshold is `> 0` for the POC so any 5xx is visible. Raise the threshold or `duration` if transient upstream 5xx are expected and the workflow retries absorb them.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "pvacd-* Cloud Run 5xx responses > 0",
+      "conditionThreshold": {
+        "filter": "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_count\" AND metric.labels.response_code_class = \"5xx\" AND resource.labels.service_name = monitoring.regex.full_match(\"pvacd-.*\")",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["resource.label.service_name"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {"count": 1}
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"}
+}

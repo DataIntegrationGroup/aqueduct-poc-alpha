@@ -1,0 +1,96 @@
+{
+  "displayName": "PVACD Pipeline",
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "xPos": 0, "yPos": 0, "width": 6, "height": 4,
+        "widget": {
+          "title": "Workflow executions by status (pvacd-daily)",
+          "xyChart": {
+            "chartOptions": {"mode": "COLOR"},
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "legendTemplate": "${metric.labels.status}",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "resource.type = \"workflows.googleapis.com/Workflow\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND resource.labels.workflow_id = \"pvacd-daily\"",
+                    "aggregation": {
+                      "alignmentPeriod": "3600s",
+                      "perSeriesAligner": "ALIGN_SUM",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": ["metric.label.status"]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 0, "width": 6, "height": 4,
+        "widget": {
+          "title": "Function responses by class (pvacd-* Cloud Run)",
+          "xyChart": {
+            "chartOptions": {"mode": "COLOR"},
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "legendTemplate": "${resource.labels.service_name} ${metric.labels.response_code_class}",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_count\" AND resource.labels.service_name = monitoring.regex.full_match(\"pvacd-.*\")",
+                    "aggregation": {
+                      "alignmentPeriod": "3600s",
+                      "perSeriesAligner": "ALIGN_SUM",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": ["resource.label.service_name", "metric.label.response_code_class"]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 4, "width": 6, "height": 4,
+        "widget": {
+          "title": "Function request latency p95 (pvacd-*)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "legendTemplate": "${resource.labels.service_name}",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "resource.type = \"cloud_run_revision\" AND metric.type = \"run.googleapis.com/request_latencies\" AND resource.labels.service_name = monitoring.regex.full_match(\"pvacd-.*\")",
+                    "aggregation": {
+                      "alignmentPeriod": "3600s",
+                      "perSeriesAligner": "ALIGN_PERCENTILE_95",
+                      "crossSeriesReducer": "REDUCE_MEAN",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {"label": "ms", "scale": "LINEAR"}
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 4, "width": 6, "height": 4,
+        "widget": {
+          "title": "About this dashboard / alerts",
+          "text": {
+            "content": "**PVACD ingest -> GCS -> FROST**, orchestrated by the `pvacd-daily` Cloud Workflow (Cloud Scheduler, daily).\n\n**Alert policies** (in `monitoring/alerts/`):\n- **Sync failure** — a `pvacd-daily` execution finished `FAILED`.\n- **Staleness / freshness** — no `SUCCEEDED` execution in 24h.\n- **5xx errors** — a `pvacd-*` function returned a 5xx.\n\n**Top-left** tracks daily run outcomes (the 2-day soak shows two `SUCCEEDED` bars). **Top-right** and **bottom-left** show per-function traffic and latency.\n\nFor per-partition data freshness (age of the newest `dt` loaded to FROST), add the optional log-based metric described in `monitoring/README.md`.",
+            "format": "MARKDOWN"
+          }
+        }
+      }
+    ]
+  }
+}
